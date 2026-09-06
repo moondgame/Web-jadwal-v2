@@ -9,6 +9,7 @@ const JURUSAN_INFO = {
 const HARI_URUT = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
 let allData = [];
+let dataLoadFailed = false;
 let state = { jurusan: null, kelas: null };
 
 const boardMain = document.getElementById('boardMain');
@@ -23,15 +24,14 @@ async function loadData() {
     const res = await fetch('jadwal.json', { cache: 'no-store' });
     if (!res.ok) throw new Error('gagal memuat');
     allData = await res.json();
+    dataLoadFailed = false;
   } catch (err) {
     allData = [];
-    boardMain.innerHTML = `
-      <div class="empty-state">
-        <p>Data jadwal belum bisa dimuat.</p>
-        <p style="font-size:13px;">Pastikan file <code>jadwal.json</code> berada di folder yang sama, dan halaman ini diakses lewat server (GitHub Pages / live server), bukan dibuka langsung sebagai file.</p>
-      </div>`;
-    return;
+    dataLoadFailed = true;
   }
+  // tombol pilihan tetap dirender walaupun data gagal dimuat —
+  // pesan error (jika ada) ditampilkan sebagai catatan kecil, bukan
+  // menggantikan seluruh halaman.
   render();
 }
 
@@ -105,6 +105,120 @@ function renderJurusanChoice() {
 
   boardMain.querySelectorAll('[data-jurusan]').forEach(card => {
     card.addEventListener('click', () => setState({ jurusan: card.dataset.jurusan, kelas: null }));
+  });
+}
+
+function renderKelasChoice() {
+  boardMain.innerHTML = `
+    <div class="choice-grid">
+      <button class="choice-card" data-kelas="A">
+        <div class="choice-card__top">
+          <h3>Kelas TI A</h3>
+          <span class="choice-card__arrow">${ICON_ARROW}</span>
+        </div>
+        <p>Lihat jadwal kuliah kelas A.</p>
+      </button>
+      <button class="choice-card" data-kelas="B">
+        <div class="choice-card__top">
+          <h3>Kelas TI B</h3>
+          <span class="choice-card__arrow">${ICON_ARROW}</span>
+        </div>
+        <p>Lihat jadwal kuliah kelas B.</p>
+      </button>
+    </div>`;
+
+  boardMain.querySelectorAll('[data-kelas]').forEach(card => {
+    card.addEventListener('click', () => setState({ kelas: card.dataset.kelas }));
+  });
+}
+
+function renderJadwal() {
+  const rows = allData.filter(item => {
+    if (item.jurusan !== state.jurusan) return false;
+    if (state.jurusan === 'TI') return item.kelas === state.kelas;
+    return true;
+  });
+
+  if (rows.length === 0) {
+    boardMain.innerHTML = `
+      <div class="empty-state">
+        <p>Belum ada jadwal yang diisi untuk pilihan ini.</p>
+        <p style="font-size:13px;">Admin dapat menambahkannya lewat halaman admin.</p>
+      </div>`;
+    return;
+  }
+
+  const byHari = {};
+  rows.forEach(r => {
+    byHari[r.hari] = byHari[r.hari] || [];
+    byHari[r.hari].push(r);
+  });
+
+  const hariTersedia = Object.keys(byHari).sort(
+    (a, b) => HARI_URUT.indexOf(a) - HARI_URUT.indexOf(b)
+  );
+
+  boardMain.innerHTML = hariTersedia.map(hari => {
+    const items = byHari[hari].sort((a, b) => a.jamMulai.localeCompare(b.jamMulai));
+    const tableRows = items.map(item => `
+      <tr>
+        <td class="time-cell">${item.jamMulai}–${item.jamSelesai}</td>
+        <td class="course-cell">
+          <strong>${escapeHtml(item.mataKuliah)}</strong>
+          <span>${escapeHtml(item.dosen)}</span>
+        </td>
+        <td>${escapeHtml(item.ruangan)}</td>
+      </tr>`).join('');
+
+    return `
+      <div class="schedule-day">
+        <div class="schedule-day__label">${hari}</div>
+        <div class="schedule-card">
+          <table class="schedule-table">
+            <thead>
+              <tr><th style="width:130px;">Waktu</th><th>Mata Kuliah &amp; Dosen</th><th style="width:140px;">Ruangan</th></tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str ?? '';
+  return div.innerHTML;
+}
+
+function render() {
+  // ganti tema warna: biru untuk TI, kuning untuk SI, netral kalau belum pilih
+  document.body.classList.remove('theme-ti', 'theme-si');
+  if (state.jurusan === 'TI') document.body.classList.add('theme-ti');
+  if (state.jurusan === 'SI') document.body.classList.add('theme-si');
+
+  const warningEl = document.getElementById('loadWarning');
+  warningEl.innerHTML = dataLoadFailed ? `
+    <div class="empty-state" style="margin-bottom:24px; padding:18px 20px; text-align:left;">
+      <p style="margin:0 0 4px;">Data jadwal (<code>jadwal.json</code>) belum bisa dimuat, jadi jadwal mungkin belum tampil.</p>
+      <p style="font-size:13px; margin:0;">Kalau ini dibuka dengan mengklik file secara langsung, coba akses lewat server (GitHub Pages / live server) — bukan lewat file://.</p>
+    </div>` : '';
+
+  renderTrail();
+  if (!state.jurusan) {
+    renderJurusanChoice();
+  } else if (state.jurusan === 'TI' && !state.kelas) {
+    renderKelasChoice();
+  } else {
+    renderJadwal();
+  }
+  // pemicu ulang animasi masuk setiap kali layar berganti
+  boardMain.classList.remove('screen-in');
+  void boardMain.offsetWidth;
+  boardMain.classList.add('screen-in');
+}
+
+loadData();
   });
 }
 
